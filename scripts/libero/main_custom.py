@@ -17,7 +17,7 @@ from scipy.spatial.transform import Rotation as R
 import tqdm
 import tyro
 import LIBERO.xyg_scripts.rotate_recolor_dataset as rotate_recolor_dataset
-
+# IF this import fails, please add xyg_scripts folder in libero. Contact Jiyun if you have any questions.
 LIBERO_DUMMY_ACTION = [0.0] * 6 + [-1.0]
 LIBERO_ENV_RESOLUTION = 256  # resolution used to render training data
 
