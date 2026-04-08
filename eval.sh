@@ -23,7 +23,7 @@ tmux split-window -h -t "$SESSION_NAME":0 -c "$WORKDIR"
 
 # pane 1: sim 실행
 tmux send-keys -t "$SESSION_NAME":0.1 \
-"source $WORKDIR/scripts/libero/.venv/bin/activate && export LIBERO_CONFIG_PATH=$WORKDIR/third_party/openpi/third_party/libero && export PYTHONPATH=\$PYTHONPATH:$WORKDIR/third_party/openpi/third_party/libero && python scripts/libero/main.py" C-m
+"source $WORKDIR/scripts/libero/.venv/bin/activate && export LIBERO_CONFIG_PATH=$WORKDIR/third_party/openpi/third_party/libero && export PYTHONPATH=\$PYTHONPATH:$WORKDIR/third_party/openpi/third_party/libero && python scripts/libero/main_custom.py" C-m
 
 # 레이아웃 정리
 tmux select-layout -t "$SESSION_NAME" tiled

@@ -16,7 +16,8 @@ from openpi_client import websocket_client_policy as _websocket_client_policy
 from scipy.spatial.transform import Rotation as R
 import tqdm
 import tyro
-import LIBERO.xyg_scripts.rotate_recolor_dataset as rotate_recolor_dataset
+import xyg_scripts.rotate_recolor_dataset as rotate_recolor_dataset
+import xyg_scripts.cross_embodiment_utils as cross_embodiment_utils
 # IF this import fails, please add xyg_scripts folder in libero. Contact Jiyun if you have any questions.
 LIBERO_DUMMY_ACTION = [0.0] * 6 + [-1.0]
 LIBERO_ENV_RESOLUTION = 256  # resolution used to render training data
@@ -55,7 +56,10 @@ class Args:
     #################################################################################################################
     video_out_path: str = "data/libero/videos"  # Path to save videos
     results_out_path: str = "data/libero/results"  # Path to save evaluation results
-
+    camera_name: str = "agentview"  # Name of camera to use for policy input and video recording
+    robot_base_name: str = "robot0_link0"
+    viewpoint_rotate: float = 0.0  # Rotate camera viewpoint by this many degrees (for testing generalization to new viewpoints)
+    gripper_type: str = "Robotiq85Gripper"  # gripper type to use in the environment. Options: ['default', 'RethinkGripper', 'PandaGripper', 'JacoThreeFingerGripper', 'JacoThreeFingerDexterousGripper', 'WipingGripper', 'Robotiq85Gripper', 'Robotiq140Gripper', 'RobotiqThreeFingerGripper', 'RobotiqThreeFingerDexterousGripper', None] 
     seed: int = 7  # Random Seed (for reproducibility)
 
 
@@ -89,7 +93,7 @@ def eval_libero(args: Args) -> None:
     }
 
     if args.task_suite_name == "libero_spatial":
-        max_steps = 220  # longest training demo has 193 steps
+        max_steps = 25  # longest training demo has 193 steps
     elif args.task_suite_name == "libero_object":
         max_steps = 280  # longest training demo has 254 steps
     elif args.task_suite_name == "libero_goal":
@@ -102,6 +106,8 @@ def eval_libero(args: Args) -> None:
         raise ValueError(f"Unknown task suite: {args.task_suite_name}")
 
     client = _websocket_client_policy.WebsocketClientPolicy(args.host, args.port)
+    print("viewpoint rotate:", args.viewpoint_rotate, "camera name:", args.camera_name)
+    print("gripper type:", args.gripper_type)
 
     # Start evaluation
     total_episodes, total_successes = 0, 0
@@ -113,7 +119,11 @@ def eval_libero(args: Args) -> None:
         initial_states = task_suite.get_task_init_states(task_id)
 
         # Initialize LIBERO environment and task description
-        env, task_description = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed, args.control_mode)
+        env_kwargs = {}
+        env_kwargs['gripper_types'] = [args.gripper_type]
+        if args.gripper_type != "default":
+            franka_env, _ = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed, args.control_mode)
+        env, task_description = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed, args.control_mode, **env_kwargs)
         # task_description = 'move forward 3cm, move right 2cm'
         # Start episodes
         task_episodes, task_successes = 0, 0
@@ -125,8 +135,14 @@ def eval_libero(args: Args) -> None:
             action_plan = collections.deque()
 
             # Set initial states
-            obs = env.set_init_state(initial_states[episode_idx])
-
+            try:
+                obs = env.set_init_state(initial_states[episode_idx])
+            except:
+                cross_embodiment_initial_states = cross_embodiment_utils.convert_franka_flat_to_franka_robotiq85_flat(src_env=franka_env, tgt_env=env, src_flat=initial_states[episode_idx])
+                obs = env.set_init_state(cross_embodiment_initial_states)
+            camera_id = env.sim.model.camera_name2id(args.camera_name)
+            env = rotate_recolor_dataset.rotate_camera(env, camera_id=camera_id, camera_name=args.camera_name, robot_base_name=args.robot_base_name, 
+                                                              theta=args.viewpoint_rotate, debug=False)
             # Setup
             t = 0
             replay_images = []
@@ -256,8 +272,31 @@ def eval_libero(args: Args) -> None:
     logging.info(f"Total episodes: {total_episodes}")
     logging.info(f"Results saved to: {results_path}")
 
+def get_libero_env(task, model_family, resolution=256):
+    """Initializes and returns the LIBERO environment, along with the task description."""
+    task_description = task.language
+    task_bddl_file = os.path.join(get_libero_path("bddl_files"), task.problem_folder, task.bddl_file)
+    env_args = {"bddl_file_name": task_bddl_file, "camera_heights": resolution, "camera_widths": resolution}
+    print(os.getenv("CUDA_VISIBLE_DEVICES"), os.getenv("MUJOCO_GL"), os.getenv("MUJOCO_EGL_DEVICE_ID"))
 
-def _get_libero_env(task, resolution, seed, controller="OSC_POSE"):
+    env = OffScreenRenderEnv(**env_args)
+    env.seed(0)  # IMPORTANT: seed seems to affect object positions even when using fixed initial state
+    return env, task_description
+
+def get_libero_env_multi_embodiment(task, model_family, resolution=256, **kwargs):
+    """Initializes and returns the LIBERO environment, along with the task description."""
+    task_description = task.language
+    task_bddl_file = os.path.join(get_libero_path("bddl_files"), task.problem_folder, task.bddl_file)
+    env_args = {"bddl_file_name": task_bddl_file, "camera_heights": resolution, "camera_widths": resolution}
+    env_args.update(kwargs)
+    print(os.getenv("CUDA_VISIBLE_DEVICES"), os.getenv("MUJOCO_GL"), os.getenv("MUJOCO_EGL_DEVICE_ID"))
+    
+    env = OffScreenRenderEnv(**env_args)
+    env.seed(0)  # IMPORTANT: seed seems to affect object positions even when using fixed initial state
+    return env, task_description
+
+
+def _get_libero_env(task, resolution, seed, controller="OSC_POSE", **kwargs):
     """Initializes and returns the LIBERO environment, along with the task description."""
     task_description = task.language
     task_bddl_file = pathlib.Path(get_libero_path("bddl_files")) / task.problem_folder / task.bddl_file
@@ -267,6 +306,7 @@ def _get_libero_env(task, resolution, seed, controller="OSC_POSE"):
         "camera_widths": resolution,
         "controller": controller,
     }
+    env_args.update(kwargs)
     env = OffScreenRenderEnv(**env_args)
     env.seed(seed)  # IMPORTANT: seed seems to affect object positions even when using fixed initial state
     return env, task_description
@@ -342,7 +382,8 @@ def get_action_from_response(replan_steps, response, state):
     grip_vals = np.full((replan_steps, 1), grip_action)
     return np.concatenate([pos_actions, rot_actions, grip_vals], axis=1)
 
-
+    
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    tyro.cli(eval_libero)
+    args = tyro.cli(Args)
+    eval_libero(args)
