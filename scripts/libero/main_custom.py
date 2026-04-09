@@ -38,7 +38,7 @@ class Args:
     host: str = "0.0.0.0"
     port: int = 8000
     resize_size: int = 224
-    replan_steps: int = 2
+    replan_steps: int = 5
     policy_type: PolicyType = PolicyType.LAP
 
     #################################################################################################################
@@ -127,7 +127,7 @@ def eval_libero(args: Args) -> None:
             franka_env, _ = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed, args.control_mode) # hw_review : 밑에서 initial state 변환할 때 기준으로 쓰려고
         env, task_description = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed, args.control_mode, **env_kwargs) # hw_review : get libero env에 **kwargs 추가로 gripper types 동적 조절
 
-        task_description
+        task_description = "pick up the black bowl"
 
         # Start episodes
         task_episodes, task_successes = 0, 0
@@ -166,11 +166,14 @@ def eval_libero(args: Args) -> None:
                         continue
                     img, wrist_img = get_images_from_obs(obs, args.resize_size)
 
+                    reasoning_this_step = None
+                    action_chunk_sum = None
                     if not action_plan:
                         # Query model to get action
                         request = obs_to_request(obs, args.policy_type, img, wrist_img, task_description)
                         response = client.infer(request)
                         current_reasoning = response.get("reasoning")
+                        reasoning_this_step = current_reasoning
                         single_action_or_chunk = np.asarray(response["actions"], dtype=np.float32)
                         if single_action_or_chunk.ndim == 1:
                             assert args.policy_type == PolicyType.LAP_AR
@@ -184,6 +187,20 @@ def eval_libero(args: Args) -> None:
                         assert len(action_chunk) >= args.replan_steps, (
                             f"We want to replan every {args.replan_steps} steps, but policy only predicts {len(action_chunk)} steps."
                         )
+                        # debug: gripper values across all 16 steps
+                        print(f"[DEBUG] step={t - args.num_steps_wait} action_chunk.shape={action_chunk.shape} gripper_per_step: {action_chunk[:, -1].tolist()}")
+
+                        # sum of full 16-step chunk, converted to physical units
+                        s = action_chunk.sum(axis=0)
+                        action_chunk_sum = {
+                            "dx_cm": float(s[0] * _OSC_POS_OUTPUT_MAX * 100),
+                            "dy_cm": float(s[1] * _OSC_POS_OUTPUT_MAX * 100),
+                            "dz_cm": float(s[2] * _OSC_POS_OUTPUT_MAX * 100),
+                            "droll_rad": float(s[3] * _OSC_ROT_OUTPUT_MAX),
+                            "dpitch_rad": float(s[4] * _OSC_ROT_OUTPUT_MAX),
+                            "dyaw_rad": float(s[5] * _OSC_ROT_OUTPUT_MAX),
+                            "gripper": float(s[6]),
+                        }
                         action_plan.extend(action_chunk[: args.replan_steps])
 
                     # Save preprocessed image for replay video
@@ -195,7 +212,8 @@ def eval_libero(args: Args) -> None:
                     step_logs.append({
                         "step": t - args.num_steps_wait,
                         "action": action.tolist(),
-                        "reasoning": current_reasoning,
+                        "reasoning": reasoning_this_step,
+                        "action_chunk_sum": action_chunk_sum,
                     })
 
                     # Execute action in environment
@@ -382,8 +400,8 @@ def _quat2rot6d(quat):
     return rot6d
 
 
-_OSC_POS_OUTPUT_MAX = 0.05   # meters: OSC_POSE scales [-1, 1] input → [-0.05, 0.05] m
-_OSC_ROT_OUTPUT_MAX = 0.5    # radians: OSC_POSE scales [-1, 1] input → [-0.5, 0.5] rad
+_OSC_POS_OUTPUT_MAX = 0.05  # meters: OSC_POSE scales [-1, 1] input → [-0.05, 0.05] m
+_OSC_ROT_OUTPUT_MAX = 0.5  # radians: OSC_POSE scales [-1, 1] input → [-0.5, 0.5] rad
 
 
 def get_action_from_response(replan_steps, response, state):

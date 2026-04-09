@@ -16,7 +16,7 @@ tmux new-session -d -s "$SESSION_NAME" -c "$WORKDIR"
 
 # pane 0: policy server 실행
 tmux send-keys -t "$SESSION_NAME":0.0 \
-"JAX_PLATFORMS=cuda uv run --group cuda --active scripts/serve_policy.py policy:checkpoint --policy.config=lap_libero --policy.dir=checkpoints/lap --policy.type=dual" C-m #dual mode : LAP + LAP_AR로 demo, Action, 실제 Language Output 생성
+"JAX_PLATFORMS=cuda uv run --group cuda --active scripts/serve_policy.py policy:checkpoint --policy.config=lap --policy.dir=checkpoints/lap --policy.type=dual" C-m #dual mode : LAP + LAP_AR로 demo, Action, 실제 Language Output 생성
 
 # 오른쪽 또는 아래로 pane 분할
 tmux split-window -h -t "$SESSION_NAME":0 -c "$WORKDIR"
