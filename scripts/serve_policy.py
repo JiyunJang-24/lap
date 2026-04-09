@@ -56,7 +56,7 @@ class Args:
 # Default checkpoints that should be used for each environment.
 DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
     EnvMode.LAP: Checkpoint(config="lap", dir="checkpoints/lap", type="flow"),
-    EnvMode.LAP_AR: Checkpoint(config="lap", dir="checkpoints/lap", type="ar"),
+    EnvMode.LAP_AR: Checkpoint(config="lap", dir="checkpoints/lap", type="ar"), #hw_review : 여기 보면 checkpoints/lap에서 똑같은 모델 불러옴, LAP이나 LAP_AR이나.
     EnvMode.LAP_LIBERO: Checkpoint(config="lap_libero", dir="checkpoints/lap_libero", type="flow"),
     EnvMode.PI05_DROID: Checkpoint(config="pi05_droid", dir="gs://openpi-assets/checkpoints/pi05_droid", type="flow"),
 }

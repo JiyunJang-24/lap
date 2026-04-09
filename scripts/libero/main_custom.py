@@ -127,7 +127,8 @@ def eval_libero(args: Args) -> None:
             franka_env, _ = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed, args.control_mode) # hw_review : 밑에서 initial state 변환할 때 기준으로 쓰려고
         env, task_description = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed, args.control_mode, **env_kwargs) # hw_review : get libero env에 **kwargs 추가로 gripper types 동적 조절
 
-        task_description = 'move forward 3cm, move right 2cm'
+        task_description
+
         # Start episodes
         task_episodes, task_successes = 0, 0
         for episode_idx in tqdm.tqdm(range(args.num_trials_per_task)):
