@@ -56,10 +56,11 @@ class Args:
     #################################################################################################################
     video_out_path: str = "data/libero/videos"  # Path to save videos
     results_out_path: str = "data/libero/results"  # Path to save evaluation results
-    camera_name: str = "agentview"  # Name of camera to use for policy input and video recording
-    robot_base_name: str = "robot0_link0"
+    log_out_path: str = "data/libero/logs"  # Path to save per-step action + reasoning logs
+    camera_name: str = "agentview"  # hw_review : 카메라 시점 회전 위한 세팅. 얘도 agentview가 XML에 정의된 카메라 이름 libero_tabletop_warm_style.xml 가면 볼 수 있음 Name of camera to use for policy input and video recording
+    robot_base_name: str = "robot0_link0" # hw_review : Franka 로봇 body 구조가 MuJoCo 환경에 XML 데이터로 들었는데, link0(제일 prefix 몸통 최하단) 임. 이거 기준으로 카메라 회전.
     viewpoint_rotate: float = 0.0  # Rotate camera viewpoint by this many degrees (for testing generalization to new viewpoints)
-    gripper_type: str = "Robotiq85Gripper"  # gripper type to use in the environment. Options: ['default', 'RethinkGripper', 'PandaGripper', 'JacoThreeFingerGripper', 'JacoThreeFingerDexterousGripper', 'WipingGripper', 'Robotiq85Gripper', 'Robotiq140Gripper', 'RobotiqThreeFingerGripper', 'RobotiqThreeFingerDexterousGripper', None] 
+    gripper_type: str = "Robotiq85Gripper"  # hw_review : LIBERO 기본값 Franka 기본 그리퍼(PandaGripper) -> Robotiq85 로 교체. gripper type to use in the environment. Options: ['default', 'RethinkGripper', 'PandaGripper', 'JacoThreeFingerGripper', 'JacoThreeFingerDexterousGripper', 'WipingGripper', 'Robotiq85Gripper', 'Robotiq140Gripper', 'RobotiqThreeFingerGripper', 'RobotiqThreeFingerDexterousGripper', None] 
     seed: int = 7  # Random Seed (for reproducibility)
 
 
@@ -75,6 +76,7 @@ def eval_libero(args: Args) -> None:
 
     pathlib.Path(args.video_out_path).mkdir(parents=True, exist_ok=True)
     pathlib.Path(args.results_out_path).mkdir(parents=True, exist_ok=True)
+    pathlib.Path(args.log_out_path).mkdir(parents=True, exist_ok=True)
 
     # Initialize results tracking
     all_results = {
@@ -93,7 +95,7 @@ def eval_libero(args: Args) -> None:
     }
 
     if args.task_suite_name == "libero_spatial":
-        max_steps = 25  # longest training demo has 193 steps
+        max_steps = 200  # longest training demo has 193 steps
     elif args.task_suite_name == "libero_object":
         max_steps = 280  # longest training demo has 254 steps
     elif args.task_suite_name == "libero_goal":
@@ -120,11 +122,12 @@ def eval_libero(args: Args) -> None:
 
         # Initialize LIBERO environment and task description
         env_kwargs = {}
-        env_kwargs['gripper_types'] = [args.gripper_type]
+        env_kwargs['gripper_types'] = [args.gripper_type] # hw_review : Robotiq85
         if args.gripper_type != "default":
-            franka_env, _ = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed, args.control_mode)
-        env, task_description = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed, args.control_mode, **env_kwargs)
-        # task_description = 'move forward 3cm, move right 2cm'
+            franka_env, _ = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed, args.control_mode) # hw_review : 밑에서 initial state 변환할 때 기준으로 쓰려고
+        env, task_description = _get_libero_env(task, LIBERO_ENV_RESOLUTION, args.seed, args.control_mode, **env_kwargs) # hw_review : get libero env에 **kwargs 추가로 gripper types 동적 조절
+
+        task_description = 'move forward 3cm, move right 2cm'
         # Start episodes
         task_episodes, task_successes = 0, 0
         for episode_idx in tqdm.tqdm(range(args.num_trials_per_task)):
@@ -137,16 +140,18 @@ def eval_libero(args: Args) -> None:
             # Set initial states
             try:
                 obs = env.set_init_state(initial_states[episode_idx])
-            except:
+            except: # hw_review : 그리퍼 교체 시 initial state 변환 로직. 변환 함수는 xyg 내부 모듈에 들었음. 
                 cross_embodiment_initial_states = cross_embodiment_utils.convert_franka_flat_to_franka_robotiq85_flat(src_env=franka_env, tgt_env=env, src_flat=initial_states[episode_idx])
                 obs = env.set_init_state(cross_embodiment_initial_states)
-            camera_id = env.sim.model.camera_name2id(args.camera_name)
+            camera_id = env.sim.model.camera_name2id(args.camera_name) #hw_review : 매 에피소드마다 카메라 회전 적용. MUJOCO에서 현재 카메라 pose 읽고, 로봇 베이스 pose 좌표계로 변환
             env = rotate_recolor_dataset.rotate_camera(env, camera_id=camera_id, camera_name=args.camera_name, robot_base_name=args.robot_base_name, 
                                                               theta=args.viewpoint_rotate, debug=False)
             # Setup
             t = 0
             replay_images = []
             wrist_replay_images = []
+            step_logs = []
+            current_reasoning = None
             episode_start_time = datetime.datetime.now()
 
             logging.info(f"Starting episode {task_episodes + 1}...")
@@ -164,6 +169,7 @@ def eval_libero(args: Args) -> None:
                         # Query model to get action
                         request = obs_to_request(obs, args.policy_type, img, wrist_img, task_description)
                         response = client.infer(request)
+                        current_reasoning = response.get("reasoning")
                         single_action_or_chunk = np.asarray(response["actions"], dtype=np.float32)
                         if single_action_or_chunk.ndim == 1:
                             assert args.policy_type == PolicyType.LAP_AR
@@ -184,6 +190,12 @@ def eval_libero(args: Args) -> None:
                     wrist_replay_images.append(wrist_img)
 
                     action = action_plan.popleft()
+
+                    step_logs.append({
+                        "step": t - args.num_steps_wait,
+                        "action": action.tolist(),
+                        "reasoning": current_reasoning,
+                    })
 
                     # Execute action in environment
                     print("Step:", t, "Action:", action)
@@ -231,6 +243,18 @@ def eval_libero(args: Args) -> None:
                 [np.asarray(x) for x in wrist_replay_images],
                 fps=10,
             )
+
+            # Save per-step action + reasoning log
+            log_entry = {
+                "task_id": task_id,
+                "task_description": task_description,
+                "episode_id": episode_idx,
+                "success": bool(done),
+                "steps": step_logs,
+            }
+            log_path = pathlib.Path(args.log_out_path) / f"task{task_id}_ep{episode_idx}.json"
+            with open(log_path, "w") as f:
+                json.dump(log_entry, f, indent=2)
 
             # Log current results
             logging.info(f"Success: {done}")

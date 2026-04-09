@@ -4,4 +4,5 @@ uv pip sync scripts/libero/requirements.txt third_party/openpi/third_party/liber
 uv pip install -e third_party/openpi/packages/openpi-client
 uv pip install -e third_party/openpi/third_party/libero
 uv pip install robosuite==1.4.1
-uv pip install easydict gym
+uv pip install easydict gym gsutil
+uv pip install transforms3d

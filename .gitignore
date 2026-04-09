@@ -5,7 +5,8 @@ __pycache__/
 .vscode/
 uv.lock
 checkpoints/
-.claude
+.claude/
+CLAUDE.md.bak
 *.png
 videos/
 *.log

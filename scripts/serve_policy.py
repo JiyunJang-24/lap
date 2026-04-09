@@ -33,7 +33,7 @@ class Checkpoint:
     config: str
     # Checkpoint directory (e.g., "checkpoints/pi0_aloha_sim/exp/10000").
     dir: str
-    type: Literal["flow", "ar"] = "flow"
+    type: Literal["flow", "ar", "dual"] = "flow"
 
 
 @dataclasses.dataclass
@@ -82,6 +82,12 @@ def create_policy(args: Args) -> _policy.Policy:
         return _policy_config.create_trained_policy(
             config, checkpoint.dir, default_prompt=args.default_prompt
         )
+    if checkpoint.type == "dual":
+        from lap.policies.policy_adapter import DualPolicy
+        base = _policy_config.create_trained_policy(
+            config, checkpoint.dir, default_prompt=args.default_prompt
+        )
+        return DualPolicy(base)
     raise NotImplementedError
 
 

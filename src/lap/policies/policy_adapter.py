@@ -59,3 +59,22 @@ class ARPolicy:
         """
 
         return self.infer_reasoning(obs)
+
+
+class DualPolicy:
+    """Flow matching으로 action 생성 + AR로 language text 생성."""
+
+    def __init__(self, base: _policy.Policy, *, sample_kwargs: dict[str, Any] | None = None):
+        self._flow = base
+        self._ar = ARPolicy(base, sample_kwargs=sample_kwargs)
+
+    def __getattr__(self, name: str):
+        return getattr(self._flow, name)
+
+    def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:
+        flow_out = self._flow.infer(obs, noise=noise)  # {"actions": [horizon,7], "reasoning": None}
+        ar_out = self._ar.infer(obs)                   # {"actions": [7], "reasoning": "move ..."}
+        return {
+            **flow_out,
+            "reasoning": ar_out.get("reasoning"),      # text를 flow 응답에 추가
+        }
